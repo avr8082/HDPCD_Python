@@ -210,7 +210,8 @@ Launch another session and copy paste the code
 >>> productsMap[1345] or prodcutsMap[1]
 >>> productsBV = sc.broadcast(productsMap)
 >>> type(productsBV) 
-# for broadcast varaible we can pass any data type. Broadcast variable can be used for LOOKUP in general. This BV we can implement at the time of while computing revenue like below:
+# for broadcast varaible we can pass any data type. Broadcast variable can be used for LOOKUP in general. 
+This BV we can implement at the time of while computing revenue like below:
 
 >>> productsBV.value[1345]
 >>> ordersJoinMap = ordersJoin.map(lambda r: ((r([1][0], productsBV.value[r[1][1][0]]), r[1][1][1]))
@@ -279,8 +280,8 @@ $ hive
 	If Hive, query compiled into Map Reduce Framework
 	If spark-sql, query compiled into Spark Framework
 
-	For both the cases, when compiled it has to read meta data. It is called Hive Meta Store. It is like a Hive Engine.
-	 NOTE: If we write to learn queries in HIVE, we can leverage same knowledge in big data technologies which support SQL interfaces like:
+For both the cases, when compiled it has to read meta data. It is called Hive Meta Store. It is like a Hive Engine.
+NOTE: If we write to learn queries in HIVE, we can leverage same knowledge in big data technologies which support SQL interfaces like:
 	 		1. spark-sql 
 	 		2. presto 
 	 		3. Impala 
@@ -344,7 +345,8 @@ stored as textfile;
 hive> load data local inpath '/data/retail_db/order_items' into table order_items;
 hive> select * from order_items limit 10;
 
-**** IMP: when using load command, be extremely careful because load command does not check any validation. If tables not changed, data will be loaded into HIVE with NULL values ****
+**** IMP: when using load command, be extremely careful because load command does not check any validation. 
+If tables not changed, data will be loaded into HIVE with NULL values ****
 
 
 
