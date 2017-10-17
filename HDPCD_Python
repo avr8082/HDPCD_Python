@@ -1,0 +1,357 @@
+# Launching Pyspark with custom config
+pyspark --master yarn --conf spark.ui.port= 12562 \
+--executor-memory 2G \
+--num-executors 1 
+
+#Launching Pyspark 
+pyspark --master yarn --conf spark.ui.port=12562
+
+# check with sparkContext sc 
+>>> sc 
+
+
+Local file path = /home/root/data/retail_db
+
+
+# create orders RDD
+>>> orders = sc.textFile("/public/retail_db/orders") 
+
+>>> orders.first() 
+>>> for order in orders.collect(): print(order)
+>>> orders.count() 
+
+Find the orders with status ( COMPLETE & CLOSED)
+>>> orderStatus = orders.map(lambda order: orders.split(",")[3])
+# Output is status of the order 
+
+# Filter the orders for COMPLETE & CLOSED status
+>>> ordersFiltered = orders.filter(lambda order = order.split(",")[3] == "COMPLETE"  or order.split(",")[3] == "CLOSED")
+>>> for i in ordersFiltered.take(100):print(i) 
+
+
+# USING ACCUMULATORS. Here ordersCompletedCount is of type of accumulator & not type of integer anymore
+Without accumulator, filter logic will be executed on executor and spark driver cannot maintain the 
+
+
+# As it is accumulator, +1 will not work. We have to use 'add' API & to get the accumulator count & use 'value' API for value
+
+ordersCompletedCount = sc.accumulator(0)
+ordersNonCompletedCount = sc.accumulator(0)
+
+def isComplete(order, ordersCompletedCount, ordersNonCompletedCount):
+	isCompleted = order.split(",")[3] == "COMPLETE" or orders.split(",")[3] == "CLOSED" 
+	if(isCompleted): ordersCompletedCount = ordersCompletedCount.add(1) 
+	else:ordersNonCompletedCount.add(1)
+	retrun isCompleted 
+
+>>> ordersFiltered = orders.filter(lambda order: isComplete(order,ordersCompletedCount, ordersNonCompletedCount))
+>>> ordersFiltered.count() 
+>>> ordersCompletedCount.value 			#30455
+>>> ordersNonCompletedCount.value       # 38428
+>>> ordersFiltered.first()  #   u'1,2013-07-25 00:00:00.0,11599,CLOSED
+
+This accumulator can be used part of in any transformation or action that is applicable as part of Spark RDDs 
+
+
+
+
+  *** CONVERTING INTO KEY, VALUE PAIRS (V 16 )
+    	1. Key should be commonn between datasets need to be joined  (order.order_id = order_items.order_item_order_id)
+    	2. We should get necessary values from the datasets 
+
+
+    # create orderitems RDD 
+    >>> orderItems = sc.textFile("/public/retail_db/order_items")
+    >>> orderItems.count() 
+    >>> for i in orderItems.take(10):print(i) 
+
+
+ >>> ordersMap = ordersFiltered.map(lambda order: (int(order.split(",")[0]), order.split(",")[1]))
+ >>> ordersMap.first() 
+ >>> for i in ordersMap.take(10):print(i)
+    RESULT = (1, u'2013-07-25 00:00:00.0')
+
+ # Map for order_id, order_item_product_id, order_item_subtotal 
+ >>> orderItemsMap = orderItems.map(lambda orderItem: (int(orderItem.split(",")[1]), (int(orderItem.split(",")[2]), float(orderItem.split(",")[4]) ) ))
+    RESULT = 1,(927, 299.99)
+
+ # Now JOINING & make sure that orders & orderitems converted into (K,V) pairs 
+ >>> ordersJoin = ordersMap.join(orderItemsMap)
+ >>> ordersJoin.count() 
+ >>> for i in ordersJoin.take(10):print(i)
+
+JOINING RESULT:
+(65536, (u'2014-05-16 00:00:00.0', (957, 299.98)))
+(65536, (u'2014-05-16 00:00:00.0', (1014, 149.94)))
+(65536, (u'2014-05-16 00:00:00.0', (957, 299.98)))
+(65536, (u'2014-05-16 00:00:00.0', (1014, 149.94)))
+(4, (u'2013-07-25 00:00:00.0', (897, 49.98)))
+(4, (u'2013-07-25 00:00:00.0', (365, 299.95)))
+(4, (u'2013-07-25 00:00:00.0', (502, 150.0)))
+(4, (u'2013-07-25 00:00:00.0', (1014, 199.92)))
+(60076, (u'2013-10-22 00:00:00.0', (1004, 399.98)))
+
+
+2014-05-16 00:00:00.0 is from ordersMap 
+(957, 299.98) is from orderItemsMap 
+
+Also we have, 
+1. leftOuterJoin  (for ex: Have orders but no order items)
+2. rightOuterJoin (for ex: )
+3. fullOuterJoin 
+
+# leftOuterJoin (There are orders but NO order items)
+>>> ordersLeftOuterJoin = ordersMap.leftOuterJoin(orderItemsMap)
+>>> for i in ordersLeftOuterJoin.take(100): print(i) 
+    Here, if no items means None 
+>>> ordersWithNoOrderItems = ordersLeftOuterJoin.filter(lambda order: order[1][1] == None)
+RESULT:
+(32739, (u'2014-02-12 00:00:00.0', None))
+
+# rightOuterJoin --> (There are order items but NO orders  
+>>> ordersRightOuterJoin = orderItemsMap.rightOuterJoin(ordersMap)
+>>> for i in ordersRightOuterJoin.take(100): print(i)
+
+
+#fullOuterJoin --> (There are no corresponding records in each dataset)
+>>> ordersFullOuterJoin = ordersMap.fullOuterJoin(orderItemsMap)
+    ordersFullOuterJoin.count() = 177387
+
+# just swap the table and check
+ >>> ordersFullOuterJoin_1 = orderItemsMap.fullOuterJoin(ordersMap)
+    ordersFullOuterJoin_1.count() = 177387
+
+  V18 - ALTERNATIVE TO AGGREGATE THE DATA:
+ 
+	1. reduceByKey - Better in performance as it uses combiner and easy to use 
+
+	2. aggregateByKey - Better in performance and need to be used in a bit complicated scenarios (where combiner logic and reducer logic are different )
+
+	3. groupByKey - Poor in performance , should be give lower priority. It can be used if above two cannot take care of aggregation
+
+Problem stmt: Get daily revenue per product 
+
+Discard order_id as it is not required
+Key = Order_date, order_item_product_id (revenue each day by product)
+USE reduceByKey to aggregate based on the key and just add to get the daily revenue by Product 
+
+# Computing daily Revenue per Product 
+First get the data in (K,V) pair using transformations 
+ordersJoinMap = ordersJoin.map(lambda r: ( (r[1][0] , r[1][1][0]), r[1][1][1]) )
+ordersJoinMap.first() 
+ordersJoinMap.count()  # 75120 
+# Map() will never change the number of count 
+
+>>> dailyRevenuePerProductId = ordersJoinMap.reduceByKey(lambda total, revenue : total + revenue)
+
+>>> dailyRevenueProductId.count()  # 9120 
+
+reduceByKey() logic is like below:
+>>> total = 0 
+>>> for i in range(1, 100): total = total + i 
+>>> total
+
+*** Broadcast Variables (V19) 
+When to use? When we have to join a very large data set to a small data set we can use broadcast variables 
+
+How to use?
+Create a hash map of a data set and do a look up. Smaller data set will be available in each of the task which is processing larger data set 
+
+Prob Stmt: 
+Get daily revenue for each product and we need to get the details of the product which is available in products data set 
+Products have to be read from local file system 
+
+Solution:
+1. Use Python File System APIs and convert products data into hash map with product_id and product_name 
+2. Build has map and broadcast using sc.broadcast 
+3. After aggregating data to get revenue by date and product, we can look up into hash map and get product name 
+
+# Get daily revenue per product using jon 
+Local path = /home/root/data/retail_db
+>>> products = open("/home/root/data/retail_db/products/part-00000").read().splitlines()
+>>> len(products) # 1345
+>>> products[0]  
+#now we have to join this data set with orders, so we have to convert this data set into RDD
+# parallelize to create RDD with existing collection. Here, products (above) is collection, hence using parallelize
+>>> productsRDD = sc.parallelize(products) 
+>>> productsRDD.count()  # 1345 
+# RESULT:
+'1,2,Quest Q64 10 FT. x 10 FT. Slant Leg Instant U,,59.98,http://images.acmesports.sports/Quest+Q64+10+FT.+x+10+FT.+Slant+Leg+Instant+Up+Canopy'
+ (product_id, product_category_id, product_name,product_desc, product_price, product_image)
+ Refer: https://www.cloudera.com/developers/get-started-with-hadoop-tutorial/exercise-1.html
+
+
+# get the product_id & product name from productsRDD using map() 
+>>> productsMap = productsRDD.map(lambda product: (int(product.split(",")[0]), product.split(",")[2]))
+
+>>> dailyRevenuePerProductIdMap = dailyRevenuePerProductId.map(lambda rec : (rec[0][1], (rec[0][0], rec[1]) ))
+RESULT = (1073, (u'2014-03-26 00:00:00.0', 3799.81))
+
+# Now, join dailyRevenuePerProductIdMap with productsMap to get product_id, daily_revenue, product_name
+>>> dailyRevenuePerProductJoinProductsMap = dailyRevenuePerProductIdMap.join(productsMap)
+>>> dailyRevenuePerProductJoinProductsMap.first()
+#now we got the product_id, daily revenue, product_name 
+(1073, (u'2014-03-26 00:00:00.0', 3799.81), 'Elevation Training Mask 2.0')
+
+#Now, we have to discard product_id (which is not required) and get only date,revenue & product_name 
+
+>>> dailyRevenuePerProductName = dailyRevenuePerProductJoinProductsMap.map(lambda rec: rec[1])
+# (Date, revenue), product_name
+(u'2014-03-26 00:00:00.0', 3799.81), 'Elevation Training Mask 2.0')
+
+See the execution life cycle here 
+Launch another session and copy paste the code 
+
+#Get the daily revenue per product using Broadcast Variables 
+
+>>> products = open("/home/root/data/retail_db/products/part-00000").read().splitlines()
+>>> productsMap = dict(map(lambda product: (int(product.split(",")[0]), product.split(",")[2]), products))
+#now we need to convert into (K,V) pairs, that is Dict. Hashmap. We have to use KEY to return the value instead of subscript 
+>>> productsMap[1345] or prodcutsMap[1]
+>>> productsBV = sc.broadcast(productsMap)
+>>> type(productsBV) 
+# for broadcast varaible we can pass any data type. Broadcast variable can be used for LOOKUP in general. This BV we can implement at the time of while computing revenue like below:
+
+>>> productsBV.value[1345]
+>>> ordersJoinMap = ordersJoin.map(lambda r: ((r([1][0], productsBV.value[r[1][1][0]]), r[1][1][1]))
+>>> dailyRevenuePerProductID = ordersJoinMap.reduceByKey(lambda total, revenue: total + revenue)
+# we will get product_name instead of product_id directly
+
+>>> dailyRevenuePerProductNameMap = dailyRevenuePerProductName.map(lambda rec : ((rec[0][0], -rec[1]), rec[0][1]))
+
+# Sort by revenue descending order
+>>> dailyRevenuePerProductNameSorted = dailyRevenuePerProductNameMap.sortByKey()
+>>> dailyRevenuePerProductNameSortedResults = dailyRevenuePerProductNameSorted.map(lambda rec: rec[0][0] + "," + str(-rec[0][1] + "," + rec[1])
+
+
+
+#development perspective also simply instead of JOining 
+Execution life cycle of BV:
+1. First execute take action on dailyRevenuePerProductId 
+>>> dailyRevenuePerProductId.take(10)
+
+
+
+
+*** SAVE THE DATA BACK TO HDFS (V 21)
+
+# Make sure this path should not be there in HDFS before running the below stmt:
+>>> dailyRevenuePerProductNameSortedResult.saveAsTextFile("/user/venkatanampudi/daily_revenue_per_product")
+
+$ hadoop fs -ls /user/venkatanampudi/daily_revenue_per_product
+$ hadoop fs -cat /user/venkatanampudi/daily_revenue_per_product
+
+*** SPARK SQL
+Agenda:
+Objectives 
+Prob.Stmt 
+Create database and tables - Text File Format 
+Create Database and tables - ORC File Format 
+Running Hive Queries 
+Spark SQL Application - Hive or SQL Context 
+Spark SQL Application - DataFrame Operations 
+
+Objectives for Certification:
+1. Create Spark DataFrames from an existing RDD 
+2. Perform operations on a DataFrame 
+3. Write a Spark SQL application
+4. Use Hive with ORC from Spark SQL 
+5. Write a Spark SQL application that reads and writes data from Hive tables 
+
+*****************************************************************************
+*** Create database and tables - Text File Format (V 23)
+Launching Spark-SQL in HDPCD:
+In Cygwin:
+ssh venkatanampudi@gw01.itversity.com 
+password (Shift+Insert)
+
+LAUNCHING SPARK-SQL:
+#spark-sql tool only available in Hortonworks 
+$ spark-sql --master yarn --conf spark.ui.port=12567
+
+spark-sql> show databases;
+
+We need to embed spark-sql queries in programming languages. On top of spark-sql, we have to use HIVE. 
+$ hive 
+
+1. HIVE is much cleaner compare to spark-sql 
+2. When we use SQL whether HIVE or spark-sql, the query will be compiled into some framework:
+	If Hive, query compiled into Map Reduce Framework
+	If spark-sql, query compiled into Spark Framework
+
+	For both the cases, when compiled it has to read meta data. It is called Hive Meta Store. It is like a Hive Engine.
+	 NOTE: If we write to learn queries in HIVE, we can leverage same knowledge in big data technologies which support SQL interfaces like:
+	 		1. spark-sql 
+	 		2. presto 
+	 		3. Impala 
+	 		4. Kudu 
+	 		5. Tez 
+
+***************************************************************************************************
+
+
+*** CREATING TABLES IN HIVE:
+$ hive 
+hive> create database venkatanampudi_retail_db_txt;
+hive> use venkatanampudi_retail_db_txt;
+
+hive> create table orders 
+(
+order_id int,
+order_date string,
+order_customer_id int,
+order_status string
+)
+row format delimited fields terminated by ','
+stored as textfile;
+
+hive(venkatanampudi_retail_db_txt) > show tables;
+
+hive> select * from orders limit 10;
+
+LOADING DATA INTO HIVE TABLE:
+# data loaded into orders table from LOCAL PATH to HIVE TABLE orders 
+# "into" for local path and will append data to existing data in the table (in this case orders)
+# use "overwrite" instead of "into" if required to delete the existing data then load
+
+hive> load data local inpath '/data/retail_db/orders' into table orders;
+
+
+
+# check if the file is created in HIVE warehouse path with data from local path
+hive> dfs -ls /apps/hive/warehouse/venkatanampudi_retail_db_txt.db/orders;
+  RESULT = /apps/hive/warehouse/venkatanampudi_retail_db_txt.db/orders/part-00000
+
+hive> select * from orders limit 10;
+
+EXTERNAL TABLE:
+Can point path to HDFS location 
+
+# create table order_items
+hive>
+create table order_items 
+(
+order_item_id int,
+order_item_order_id int,
+order_item_product_id int,
+order_item_quantity int,
+order_item_subtotal float,
+order_item_product_price float
+)
+row format delimited fields terminated by ','
+stored as textfile;
+
+hive> load data local inpath '/data/retail_db/order_items' into table order_items;
+hive> select * from order_items limit 10;
+
+**** IMP: when using load command, be extremely careful because load command does not check any validation. If tables not changed, data will be loaded into HIVE with NULL values ****
+
+
+
+
+
+
+
+
+
+
