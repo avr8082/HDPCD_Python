@@ -1,5 +1,5 @@
 # Launching Pyspark with custom config
-pyspark --master yarn --conf spark.ui.port= 12562 \
+$ pyspark --master yarn --conf spark.ui.port= 12562 \
 --executor-memory 2G \
 --num-executors 1 
 
@@ -8,11 +8,8 @@ pyspark --master yarn --conf spark.ui.port=12562
 
 # check with sparkContext sc 
 >>> sc 
-
-
 Local file path = /home/root/data/retail_db
-
-
+HDFS path = /public/retail_db/orders
 # create orders RDD
 >>> orders = sc.textFile("/public/retail_db/orders") 
 
@@ -28,10 +25,8 @@ Find the orders with status ( COMPLETE & CLOSED)
 >>> ordersFiltered = orders.filter(lambda order = order.split(",")[3] == "COMPLETE"  or order.split(",")[3] == "CLOSED")
 >>> for i in ordersFiltered.take(100):print(i) 
 
-
 # USING ACCUMULATORS. Here ordersCompletedCount is of type of accumulator & not type of integer anymore
 Without accumulator, filter logic will be executed on executor and spark driver cannot maintain the 
-
 
 # As it is accumulator, +1 will not work. We have to use 'add' API & to get the accumulator count & use 'value' API for value
 
@@ -51,10 +46,6 @@ def isComplete(order, ordersCompletedCount, ordersNonCompletedCount):
 >>> ordersFiltered.first()  #   u'1,2013-07-25 00:00:00.0,11599,CLOSED
 
 This accumulator can be used part of in any transformation or action that is applicable as part of Spark RDDs 
-
-
-
-
   *** CONVERTING INTO KEY, VALUE PAIRS (V 16 )
     	1. Key should be commonn between datasets need to be joined  (order.order_id = order_items.order_item_order_id)
     	2. We should get necessary values from the datasets 
@@ -210,8 +201,7 @@ Launch another session and copy paste the code
 >>> productsMap[1345] or prodcutsMap[1]
 >>> productsBV = sc.broadcast(productsMap)
 >>> type(productsBV) 
-# for broadcast varaible we can pass any data type. Broadcast variable can be used for LOOKUP in general. 
-This BV we can implement at the time of while computing revenue like below:
+# for broadcast varaible we can pass any data type. Broadcast variable can be used for LOOKUP in general. This BV we can implement at the time of while computing revenue like below:
 
 >>> productsBV.value[1345]
 >>> ordersJoinMap = ordersJoin.map(lambda r: ((r([1][0], productsBV.value[r[1][1][0]]), r[1][1][1]))
@@ -224,17 +214,13 @@ This BV we can implement at the time of while computing revenue like below:
 >>> dailyRevenuePerProductNameSorted = dailyRevenuePerProductNameMap.sortByKey()
 >>> dailyRevenuePerProductNameSortedResults = dailyRevenuePerProductNameSorted.map(lambda rec: rec[0][0] + "," + str(-rec[0][1] + "," + rec[1])
 
-
-
 #development perspective also simply instead of JOining 
 Execution life cycle of BV:
 1. First execute take action on dailyRevenuePerProductId 
 >>> dailyRevenuePerProductId.take(10)
 
-
-
-
-*** SAVE THE DATA BACK TO HDFS (V 21)
+*****************************************************************************
+SAVE THE DATA BACK TO HDFS (V 21)
 
 # Make sure this path should not be there in HDFS before running the below stmt:
 >>> dailyRevenuePerProductNameSortedResult.saveAsTextFile("/user/venkatanampudi/daily_revenue_per_product")
@@ -260,7 +246,7 @@ Objectives for Certification:
 5. Write a Spark SQL application that reads and writes data from Hive tables 
 
 *****************************************************************************
-*** Create database and tables - Text File Format (V 23)
+*** Create database and tables - Text File Format (V 23) ***
 Launching Spark-SQL in HDPCD:
 In Cygwin:
 ssh venkatanampudi@gw01.itversity.com 
@@ -280,8 +266,8 @@ $ hive
 	If Hive, query compiled into Map Reduce Framework
 	If spark-sql, query compiled into Spark Framework
 
-For both the cases, when compiled it has to read meta data. It is called Hive Meta Store. It is like a Hive Engine.
-NOTE: If we write to learn queries in HIVE, we can leverage same knowledge in big data technologies which support SQL interfaces like:
+	For both the cases, when compiled it has to read meta data. It is called Hive Meta Store. It is like a Hive Engine.
+	 NOTE: If we write to learn queries in HIVE, we can leverage same knowledge in big data technologies which support SQL interfaces like:
 	 		1. spark-sql 
 	 		2. presto 
 	 		3. Impala 
@@ -289,9 +275,7 @@ NOTE: If we write to learn queries in HIVE, we can leverage same knowledge in bi
 	 		5. Tez 
 
 ***************************************************************************************************
-
-
-*** CREATING TABLES IN HIVE:
+*** CREATING TABLES IN HIVE ***
 $ hive 
 hive> create database venkatanampudi_retail_db_txt;
 hive> use venkatanampudi_retail_db_txt;
@@ -316,8 +300,6 @@ LOADING DATA INTO HIVE TABLE:
 # use "overwrite" instead of "into" if required to delete the existing data then load
 
 hive> load data local inpath '/data/retail_db/orders' into table orders;
-
-
 
 # check if the file is created in HIVE warehouse path with data from local path
 hive> dfs -ls /apps/hive/warehouse/venkatanampudi_retail_db_txt.db/orders;
@@ -345,8 +327,493 @@ stored as textfile;
 hive> load data local inpath '/data/retail_db/order_items' into table order_items;
 hive> select * from order_items limit 10;
 
-**** IMP: when using load command, be extremely careful because load command does not check any validation. 
-If tables not changed, data will be loaded into HIVE with NULL values ****
+**** IMP: when using load command, be extremely careful because load command does not check any validation. If tables not changed, data will be loaded into HIVE with NULL values ****
+
+*****************************************************************************
+*** CREATING DATABASE TABLES FOR ORC FILE FORMAT ****
+
+hive> create database vanampudi_retail_db_orc;
+hive> use vanampudi_retail_db_orc;
+
+# Except text file, no need to store the meta data. Hence, delimiters not required.
+We just have to use STORED AS string 
+ORC is much more reliable and much more flexible
+
+#creating tables (orders, order_items)  for ORC 
+
+create table orders 
+(
+order_id int,
+order_date string,
+order_customer_id int,
+order_status string
+)
+stored as orc;
+
+create table order_items 
+(
+order_item_id int,
+order_item_order_id int,
+order_item_product_id int,
+order_item_quantity int,
+order_item_subtotal float,
+order_item_product_price float
+)
+stored as orc;
+
+hive> describe formatted orders; (formatted more readable)
+hive> describe formatted order_items;
+hive> describe extended orders; 
+hive> describe extended order_items;
+
+LOADING DATA INTO ORC TABLES;
+Since we do not have delimiter in ORC, loading the data in 2 step process
+Local File --> Staging Table --> ORC table 
+
+1. Loading from orders txt --> orders orc using insert stmt
+hive> insert into table orders select * from venkatanampudi_retail_db_txt.orders; 
+hive> insert into table order_items select * from venkatanampudi_retail_db_txt.order_items;
+
+VIEW THE DATA 
+hive> select * from orders limit 10;
+hive> select * from order_items limit 10;
+
+*****************************************************************************
+**** USING HIVE QUERIES IN PYTHON (V 37)***
+
+1. Launch pyspark using custom config (custom config is not mandatory always as it is already configured by admin)
+$ pyspark --master yarn --conf spark.ui.port= 12562 \
+--executor-memory 2G \
+--num-executors 1 
+
+2. After pyspark launched, we generally see SparkContext(sc) & another objects called sqlContext. 
+Data type of sqlContext is HiveContext
+Data typeof sc is SparkContext 
+
+Use sqlContext to submit queries in HiveContext like below:
+
+# To use my database in Python
+>>> sqlContext.sql("use venkatanampudi_retail_db_txt")
+
+#when we run sqlContext.sql whatever the results of type Data Frames. To display the results of DF use "show()" 
+>>> sqlContext.sql("show tables").show()
+
+# describe formatted will not show complete metadata information. Use for loop to print
+>>> sqlContext.sql("describe formatted orders").show() 
+>>> for i in sqlContext.sql("describe formatted orders").collect():print(i)
+
+# To display data from orders table in python 
+>>> sqlContext.sql("select * from orders limit 10").show() 
+
+# we can do below in SPARK SQL for Python 
+Filtering (horizontal and vertical)
+Functions 
+Row level transformations 
+Joins 
+Aggregations 
+Sorting 
+Set operations 
+Analytical Functions 
+Windowing Functions 
+*****************************************************************************
+*** Spark-SQL:Functions Manipulating Stings (V39) ***
+
+hive> show functions;
+Most of the functions in line with Oracle, MySQL etc 
+
+Aggregate functions 
+String functions 
+Data functions 
+
+Syntax and semantics of any function 
+hive> describe function length;s 
+length(str | binary)
+# String need to pass in single quotes in Hive. Double quotes also ok.
+hive> select length('Hello World');
+11 
+
+hive> use venkatanampudi_retail_db_txt;
+hive> use vanampudi_retail_db_orc;
+hive> select order_status, length(order_status) from orders limit 100;
+
+*** Spark-SQL:Functions - Manipulating Strings (V 39 ) 
+hive> show functions;
+
+### Frequently used functions:
+substr or substring 
+instr 
+like 
+rlike 
+length 
+upper / ucase 
+lower / lcase 
+trim, ltrim, rtrim
+lpad, rpad 
+split
+initcap (each word starts with CAPITAL)
+cast
+###    
+
+
+# create customer table in HIVE 
+create table customers 
+( 
+customer_id int,
+customer_fname varchar(45),
+customer_lname varchar(45),
+customer_email varchar(45),
+customer_password varchar(45),
+customer_street varchar(255),
+customer_city varchar(45),
+customer_state varchar(45),
+customer_zipcode varchar(45)
+)
+row format delimited fields terminated by ','
+stored as textfile;
+
+hive> load data local inpath '/data/retail_db/customers' into table customers;
+
+#Substr:
+hive> describe function substr;
+hive> select substr('Hello World', 7);
+hive> select substr('Hello World, How are you', 7, 5);
+hive> select substr('Hello World', -5);    # output is last 5 chars "World"
+hive> select substr('Hello World, How are you',-7,3);    # output is "are"
+
+#instr:
+#particular occurence of char for the given instring in string
+select instr('Hello World', 'World'); #o/p = 7 
+
+#like: (used to match string patterns)
+describe function like;
+select "Hello World, How are you" like 'Hello'; # false
+select "Hello World, How are you" like 'Hello%'; # true
+# true as string starts with Hello if we use "%"
+select "Hello World, How are you" like 'World%'; # false
+select "Hello World, How are you" like '%World%'; # true (becoz string World is there in main string)
+
+#rlike:(used to match any substrings )
+select "Hello World, How are you" rlike '%World%';
+
+select lower("Hello World");
+select lcase("Hello");
+
+select upper("hello"); HELLO
+select ucase("hello");HELLO
+
+#trim = trim function trims starting and ending spaces in string
+hive> select trim(' hello world '); #output = hello world
+
+hive> select trim(' hello world '), length(trim(' hello world '));
+#hello world 11
+
+select ltrim(' hello world '); #trim only left space 
+select rtrim('hello world '); # trim only right space 
+
+#lpad:
+describe function lpad;
+select lpad(2,2,'0');
+select lpad(12, 12,'0');
+# First 12 = integer
+  Second 12 = length of total integer 
+  0 = pad with 0 in leftside of 12 
+  Result = 000000000012
+
+#cast:
+select cast("12" as int);
+select substr(order_date,6,7) from orders limit 10;
+select cast(substr(order_date,6,7) as int) from orders limit 10;
+
+#split:
+# split the string Hello World, how are you into ARRAY.
+select split("Hello world, how are you", ' ');
+  RESULT = ["hello","world","how","are","you"]
+
+select index(split("Hello world, how are you", ' '), 4);
+RESULT = you (index of string "you" in array)
+select index(split("Hello world, how are you", ' '), 0);
+RESULT = Hello
+
+*****************************************************************************
+*** Spark-SQL:Functions -Aggregate Functions (V40) ***
+
+count 
+avg 
+min 
+max 
+
+hive> select count(*) from orders; 
+# use any literal not only * 
+hive> select sum(order_item_subtotal) from order_items;
+hive> select max(order_item_subtotal) from order_items;
+
+DIFFERENCE:
+Normal functions - take one record as input and return one record as output 
+Agg - take multiple records as input and returns one record as output. Hence, we cannot have other fields in agg.functions for ex:
+
+hive> select count(*), order_status from order_items; --> THIS WILL THROW ERROR
+hive> select count(*), count(distinct order_status) from orders; --> THIS IS VALID as both functions take entire dataset as a single group
+
+*****************************************************************************
+***  Spark-SQL:Functions - Manipulating Dates (V41) ***
+
+#DATE FUNCTIONS
+curent_date 
+current_timestamp 
+date_add
+date_format
+date_sub 
+datediff 
+day 
+dayofmonth
+to_date 
+to_unix_timestamp 
+to_utc_timestamp
+from_unixtime
+from_utc_timestamp
+minute
+month
+months_between
+next_day 
+
+GOOGLE SEARCH: apache.hive.org 
+
+hive> select date_format(current_date, 'y');  # 2017
+
+hive> select date_format(current_date, 'd'); # 17
+
+select current_date; 2017-10-17
+select dayofmonth(current_date);
+select day('2017-10-10'); 10 
+select current_timestamp; 2017-10-17 15:02:14.574
+select to_date(current_timestamp); 2017-10-17
+
+#Unix Timestamp
+Performance is better if we use numbers instead of strings and preseve in database. This is the purpose of using unix timestamp functions
+select to_unix_timestamp(current_timestamp);   1508267081
+select to_unix_timestamp(current_date);    1508212800
+select from_unixtime(1508267081);      2017-10-17 15:04:41
+select to_date(from_unixtime(1508267081));   2017-10-17
+
+
+# Converting order_date with timestamp into date 
+select to_date(order_date) from orders limit 10; # 2013-07-25
+
+#add 5 days to order_date using date_add function 
+select date_add(order_date, 5) from orders limit 10; 2013-07-30
+
+*************************  Spark-SQL:Functions - Functions CASE (V42) 
+
+case - if(condition) else if(condition) 'y' else 'z'
+nvl
+
+we use if condition to compare a value and take action 
+
+describe function case;
+
+hive> select distinct order_status from orders;
+OK
+CANCELED
+CLOSED
+COMPLETE
+ON_HOLD
+PAYMENT_REVIEW
+PENDING
+PENDING_PAYMENT
+PROCESSING
+SUSPECTED_FRAUD
+
+BEFORE Case Class:
+select order_status from orders limti 10;
+OK
+CLOSED
+PENDING_PAYMENT
+COMPLETE
+CLOSED
+COMPLETE
+COMPLETE
+COMPLETE
+PROCESSING
+PENDING_PAYMENT
+PENDING_PAYMENT
+
+select case order_status
+			when 'CLOSED' then 'No Action'
+			when 'COMPLETE' then 'No Action'
+			end from orders limit 10;
+
+After Case Class:
+OK
+no action
+NULL
+no action
+no action
+no action
+no action
+no action
+NULL
+NULL
+NULL
+
+# case with equal operator (you can use column name with case )
+select order_status,
+		case order_status
+			when 'CLOSED' then 'No Action'
+			when 'COMPLETE' then 'No Action'
+			when 'ON_HOLD' then 'Pending Action'
+			when 'PAYMENT_REVIEW' then 'Pending Action'
+			when 'PENDING_PAYMENT' then 'Pending Action'
+			when 'PENDING' then 'Pending Action'
+			when 'PROCESSING' then 'Pending Action'
+			else 'Risky'
+		end from orders limit 10;
+
+
+# case with non-equal operator (no need to use column name everytime only once with select)
+select order_status,
+	case
+		when order_status IN('CLOSED', 'COMPLETE') then 'No Action'
+		when order_status IN('ON_HOLD','PAYMENT_REVIEW', 'PENDING', 'PENDING_PAYMENT','PROCESSING') then 'Pending Action' 
+		else 'Risky'
+	end from orders limit 10;
+
+#NVL is special type of case function and inherited from ORACLE
+select nvl(order_status, 'Status Missing') from orders limit 100; 
+# If order_status is null we get 'Status Missing' otherwise same order_status
+
+We can written same stmt with CASE class 
+select case when order_status is null then 'Status Missing'else order_status end from orders limit 10;
+
+*****************************************************************************
+*** Spark-SQL:Functions - Row Level Transformations (V43) ***
+
+Typically used for data standadization (for ex: SSN) and store in particular way
+Data cleaning - Removing spl.char in particular fields 
+Data offset 
+Certain transformation for downstream applications for ex:order_date represented by date and tiem 
+Type cast after extracting into integer for performance reasons 
+
+Use substr, concatenate, converting date format from one date to string 
+
+#concat year & month 
+hive> select concat(substr(order_date,1,4), substr(order_date,6,2))
+ 	from orders limit 10;
+	RESULT= 201307
+
+hive> select concat(substr(order_date,1,4), substr(order_date,6,2), substr(order_date, 9,2))
+	from orders limit 10;
+	RESULT = 20130725
+
+#type cast date into Integer (concat and convert into integer)
+hive> select cast(concat(substr(order_date,1,4), substr(order_date,6,2)) as int) from orders limit 10;
+
+OR we can use date functions:
+ select date_format(current_date, 'YYYYMM');
+201710
+
+select date_format('2013-07-25', 'YYYYMM');
+RESULT = 201307
+
+hive> show functions;
+select date_format(current_date, 'YYYYMM');
+
+select cast(date_format(order_date, 'YYYYMM') as int) from orders limit 100;
+RESULT= 201307
+This is better solution than previous one functions. We can implement these row level transformations in Hive 
+
+*****************************************************************************
+*** Spark-SQL: Joining Data from Multiple Tables (V44) ***
+
+hive> select * from orders limit 10;
+
+# this is legacy way of dealing with JOINS 
+hive> select o.*, c.* from orders o, customers c
+where o.order_customer_id = c.customer_id 
+limit 10;
+
+#ASCII joins 
+# They believe that joining and filtering is different and filtering while joining is not a good idea. This is the reason for this type of join.
+
+hive> select o.*, c.* from orders o join customers c 
+on o.order_customer_id = c.customer_id;
+
+Join means it inner join 
+#if you want to join multiple columns on join, we can add with 'and'
+hive> select o.*, c.* from orders o join customers c 
+on o.order_customer_id = c.customer_id and <ONE MORE JOIN CONDITION> 
+
+LEFT OUTER JOIN:
+For ex: Customers LEFT OUTER JOIN Orders 
+Result: Common records from Customers and Orders + additional records from Customers 
+
+SELECT o.*, c.* from customers c left outer join orders o 
+ON o.order_customer_id = c.customer_id 
+LIMIT 10;
+
+SELECT count(*) from customers c LEFT OUTER JOIN orders o 
+ON o.order_customer_id = c.customer_id;
+68913
+
+
+SELECT count(*) from customers c INNER JOIN orders o 
+ON o.order_customer_id = c.customer_id;
+68883
+
+# Find out the number of records customers not placed an orders 
+SELECT count(*) from customers c LEFT OUTER JOIN orders o 
+ON o.order_customer_id = c.customer_id 
+WHERE o.order_customer_id IS NULL;
+30
+
+SELECT * from customers c LEFT OUTER JOIN orders o 
+ON o.order_customer_id = c.customer_id 
+WHERE o.order_customer_id IS NULL;
+30
+
+IN CLAUSE (same as before query)
+Performance wise Hive In Cluase is not efficient (nested queries)
+select * from customers WHERE customer_id 
+not in(select distinct order_customer_id from orders);
+
+If you want only customers details, use c.* 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
